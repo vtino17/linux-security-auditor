@@ -1,5 +1,7 @@
 # Linux Security Auditor
 
+[![CI](https://github.com/vtino17/linux-security-auditor/actions/workflows/ci.yml/badge.svg)](https://github.com/vtino17/linux-security-auditor/actions/workflows/ci.yml)
+
 Comprehensive Linux security audit tool that checks kernel parameters, SSH configuration, file permissions, firewall status, user accounts, available updates, and open ports.
 
 ## Installation
