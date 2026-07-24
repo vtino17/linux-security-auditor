@@ -1,12 +1,1 @@
-*.pyc
-__pycache__/
-*.egg-info/
-dist/
-build/
-*.html
-*.log
-.vscode/
-.idea/
-*.swp
-*.swo
-.DS_Store
+*.pyc\n__pycache__/\n*.log
