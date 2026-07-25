@@ -19,6 +19,11 @@ def main():
     parser.add_argument('--checks', type=str, help='comma-separated check categories')
     parser.add_argument('--quiet', action='store_true', help='suppress progress output')
 
+    if len(sys.argv) == 1:
+        parser.print_help()
+        print("\nRun with no arguments to perform a full security audit.")
+        return
+
     args = parser.parse_args()
 
     results = run_all()
