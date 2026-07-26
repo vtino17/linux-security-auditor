@@ -2,4 +2,4 @@
 
 ## [1.0.0] - 2026-07-26
 ### Added
-- Friendly help message when no args provided
+- linux-security-auditor release
