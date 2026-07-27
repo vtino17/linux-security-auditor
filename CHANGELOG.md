@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 ### Fixed
+- `build-backend` pointed at `setuptools.backends._legacy:_Backend`, a path
+  that does not exist, so `pip install -e .` failed and CI had not passed on
+  `main` since 2026-07-24. Now `setuptools.build_meta`, matching the other
+  projects in this set.
 - Empty-password detection never fired. A `continue` guard discarded the very
   values (`''` and `NP`) the check below it was meant to collect, so the audit
   always reported "empty passwords: none" no matter what was in the shadow
