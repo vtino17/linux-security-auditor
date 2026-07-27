@@ -3,12 +3,25 @@ import os
 
 try:
     import pwd
-    import spwd
     import grp
     _POSIX = True
 except ImportError:
-    pwd = spwd = grp = None
+    pwd = grp = None
     _POSIX = False
+
+try:
+    import spwd
+except ImportError:
+    # Removed in Python 3.13 by PEP 594. Its absence says nothing about
+    # whether we are on a POSIX host, so it must not gate _POSIX -- the
+    # shadow file is read directly instead.
+    spwd = None
+
+# Shadow password fields that mean "this account cannot authenticate with a
+# password", as opposed to an empty field, which means anyone can log in
+# without one.
+_LOCKED_HASHES = ('!', '*', '!!', '!*', 'x')
+_EMPTY_HASHES = ('', 'NP')
 
 
 def _run(cmd, timeout=10):
@@ -31,6 +44,29 @@ def _read_file(path):
 
 def _fmt(s):
     return ' '.join(s.split()) if s else ''
+
+
+def shadow_entries(path='/etc/shadow'):
+    """Yield (username, password_field) pairs from the shadow database.
+
+    Uses :mod:`spwd` where it still exists and falls back to parsing
+    ``/etc/shadow`` on Python 3.13+, where the module was removed. Raises
+    ``PermissionError`` when the database cannot be read, so callers can tell
+    "nothing to report" apart from "could not look".
+    """
+    if spwd is not None:
+        return [(e.sp_namp, e.sp_pwd) for e in spwd.getspall()]
+
+    entries = []
+    with open(path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split(':')
+            if len(parts) >= 2:
+                entries.append((parts[0], parts[1]))
+    return entries
 
 
 def check_kernel_params():
@@ -112,17 +148,21 @@ def check_file_permissions():
         try:
             st = os.stat(path)
             actual_perm = oct(st.st_mode & 0o777)[2:]
-            owner = pwd.getpwuid(st.st_uid).pw_name if _POSIX else '?'
+            owner = pwd.getpwuid(st.st_uid).pw_name if _POSIX else None
             perm_ok = actual_perm == expected_perm
-            owner_ok = owner == expected_owner
-            details = f'{actual_perm} {owner}'
-            if perm_ok and owner_ok:
-                results.append(dict(name=f'perms {path}', status='pass', details=details, remediation=''))
+            # An unresolvable owner is a gap in the audit, not a finding
+            # against the host -- claiming otherwise produced a chown
+            # remediation for files that were already correct.
+            owner_ok = owner == expected_owner if owner is not None else None
+            details = f'{actual_perm} {owner if owner is not None else "owner unknown"}'
+            if perm_ok and owner_ok is not False:
+                status = 'pass' if owner_ok else 'warn'
+                results.append(dict(name=f'perms {path}', status=status, details=details, remediation=''))
             else:
                 fail = []
                 if not perm_ok:
                     fail.append(f'chmod {expected_perm} {path}')
-                if not owner_ok:
+                if owner_ok is False:
                     fail.append(f'chown {expected_owner}:{expected_owner} {path}')
                 results.append(dict(name=f'perms {path}', status='fail', details=details, remediation='; '.join(fail)))
         except FileNotFoundError:
@@ -183,36 +223,46 @@ def check_users():
     else:
         results.append(dict(name='root UID', status='fail', details=f'uid={root.pw_uid}', remediation=''))
 
+    empty = []
+    readable = True
     try:
-        for entry in spwd.getspall():
-            if entry.sp_pwd in ('', 'NP', '!', '*'):
-                continue
-            if entry.sp_pwd.startswith('$'):
-                results.append(dict(name=f'pwd {entry.sp_namp}', status='pass', details='hashed', remediation=''))
-            else:
-                results.append(dict(name=f'pwd {entry.sp_namp}', status='fail', details='cleartext or weak', remediation=f'passwd {entry.sp_namp}'))
-    except PermissionError:
+        entries = shadow_entries()
+    except (PermissionError, FileNotFoundError, OSError):
+        entries = []
+        readable = False
         results.append(dict(name='shadow passwords', status='warn', details='permission denied', remediation=''))
 
-    empty = []
-    try:
-        for entry in spwd.getspall():
-            if entry.sp_pwd in ('', 'NP', '!', '*'):
-                continue
-            if entry.sp_pwd == '' or entry.sp_pwd == 'NP':
-                empty.append(entry.sp_namp)
-    except PermissionError:
-        pass
+    for name, pw_hash in entries:
+        if pw_hash in _EMPTY_HASHES:
+            # No password at all -- collected below rather than skipped.
+            empty.append(name)
+        elif pw_hash in _LOCKED_HASHES or pw_hash.startswith('!'):
+            continue
+        elif pw_hash.startswith('$'):
+            results.append(dict(name=f'pwd {name}', status='pass', details='hashed', remediation=''))
+        else:
+            results.append(dict(name=f'pwd {name}', status='fail', details='cleartext or weak', remediation=f'passwd {name}'))
+
     if empty:
         results.append(dict(name='empty passwords', status='fail', details=', '.join(empty), remediation=f'passwd -l {" ".join(empty)}'))
-    else:
+    elif readable:
         results.append(dict(name='empty passwords', status='pass', details='none', remediation=''))
+    else:
+        results.append(dict(name='empty passwords', status='warn', details='shadow database unreadable', remediation='re-run as root'))
 
     last_out, _, _ = _run(['last', '-5'])
     details = _fmt(last_out[:300]) if last_out else 'none'
     results.append(dict(name='recent logins', status='info', details=details, remediation=''))
 
-    for user in pwd.getpwall():
+    # getpwall() is optional -- some libc implementations (bionic, musl in
+    # certain builds) ship pwd without it, and calling it aborted the whole
+    # user audit rather than skipping one check.
+    getpwall = getattr(pwd, 'getpwall', None)
+    if getpwall is None:
+        results.append(dict(name='non-root UID 0', status='warn', details='cannot enumerate passwd database', remediation=''))
+        return results
+
+    for user in getpwall():
         if user.pw_uid == 0 and user.pw_name not in ('root', 'sync', 'shutdown', 'halt', 'toor'):
             results.append(dict(name=f'non-root UID 0: {user.pw_name}', status='fail', details=f'uid={user.pw_uid} shell={user.pw_shell}', remediation=f'userdel {user.pw_name}'))
             break
