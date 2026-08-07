@@ -84,6 +84,18 @@ class TestSSHChecks(unittest.TestCase):
         self.assertTrue(len(results) == 1)
         self.assertEqual(results[0]['status'], 'warn')
 
+    @patch('lsa.auditor._read_file')
+    def test_ssh_first_value_wins(self, mock_read):
+        mock_read.return_value = (
+            'PermitRootLogin yes\n'
+            'PermitRootLogin no\n'
+            'PasswordAuthentication no\n'
+        )
+        results = check_ssh_config()
+        root = next(r for r in results if 'PermitRootLogin' in r['name'])
+        self.assertEqual(root['status'], 'fail')
+        self.assertEqual(root['details'], '=yes')
+
 
 class TestFilePerms(unittest.TestCase):
     @patch('lsa.auditor.os.stat')

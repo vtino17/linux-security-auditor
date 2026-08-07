@@ -108,7 +108,10 @@ def check_ssh_config():
             continue
         parts = line.split(None, 1)
         if len(parts) == 2:
-            config[parts[0].lower()] = parts[1]
+            # sshd uses the first obtained value for each keyword. Keeping the
+            # last value can make a later, ineffective hardening line hide an
+            # insecure directive that actually controls the daemon.
+            config.setdefault(parts[0].lower(), parts[1])
 
     checks = [
         ('PermitRootLogin', lambda v: v and v.lower() in ('no', 'prohibit-password', 'without-password'), 'set PermitRootLogin no'),
