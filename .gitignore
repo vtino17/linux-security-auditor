@@ -25,6 +25,3 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
-
-# Project
-SECURITY.md
