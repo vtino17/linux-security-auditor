@@ -63,7 +63,7 @@ def main():
         if not args.quiet:
             print(f'[{section}]')
         for c in checks:
-            icon = {'pass': '\u2713', 'fail': '\u2717', 'warn': '?', 'info': 'i', 'error': '!'}.get(c['status'], '?')
+            icon = {'pass': '\u2713', 'fail': '\u2717', 'warn': '\u26a0', 'info': 'i', 'error': '\u2718'}.get(c['status'], '?')
             if not args.quiet:
                 print(f'  {icon} {c["name"]}: {c["status"].upper()}  {c["details"][:120]}')
         if not args.quiet:
